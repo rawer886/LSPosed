@@ -1,10 +1,13 @@
 #!/system/bin/sh
 
-dir=${0%/*}
+# 这个文件执行的入口有两个: 1. post-fs-data.sh; 2. service.sh
+dir=${0%/*} # /data/adb/modules/zygisk_lsposed
 tmpLspdApk="/data/local/tmp/daemon.apk"
+# @***@ 占位符. 会在打包脚本进行替换
 debug=@DEBUG@
 flavor=@FLAVOR@
 
+# $tmpLspdApk存在且可读 (即已经安装了 lspd.apk)
 if [ -r $tmpLspdApk ]; then
   java_options="-Djava.class.path=$tmpLspdApk"
   debug="true"
@@ -12,9 +15,10 @@ else
   java_options="-Djava.class.path=$dir/daemon.apk"
 fi
 
+# 开启调试模式,并设置相关参数
 if [ $debug = "true" ]; then
   os_version=$(getprop ro.build.version.sdk)
-  if [ "$os_version" -eq "27" ]; then
+  if [ "$os_version" -eq "27" ]; then # -eq: 等于
     java_options="$java_options -Xrunjdwp:transport=dt_android_adb,suspend=n,server=y -Xcompiler-option --debuggable"
   elif [ "$os_version" -eq "28" ]; then
     java_options="$java_options -XjdwpProvider:adbconnection -XjdwpOptions:suspend=n,server=y -Xcompiler-option --debuggable"
@@ -23,19 +27,29 @@ if [ $debug = "true" ]; then
   fi
 fi
 
+# 临时挂载 tmpfs 到 /data/resource-cache
 mount tmpfs -t tmpfs /data/resource-cache
 
+# -S file: file 存在且是一个 socket
 if [ ! -S "/dev/socket/zygote" ]; then
+  # timeout: 设置超时时间. 如果超过了超时时间, 则会自动返回,防止 inotifyd 命令一直阻塞
+  # 监听 /dev/socket 目录下的文件变化, 然后过滤出 /dev/socket/zgote 文件是否被创建出来
+  # :near 是 inotifyd 命令的一个参数, 表示监听 /dev/socket 目录下的所有文件的变化
+  log -p v -t "LSPosed" "wait for zygote"
   timeout 0.5 inotifyd - /dev/socket:near | while read -r line; do
     $debug && log -p v -t "LSPosed" "inotify: $line"
     if [ -S "/dev/socket/zygote" ]; then
       $debug && log -p v -t "LSPosed" "zygote started"
-      touch /dev/socket&
+      touch /dev/socket& # 为什么要 touch /dev/socket 为了更新文件的时间戳吗?
       exit
     fi
   done
 fi
-$debug && log -p d -t "LSPosed" "start $flavor daemon $*"
+# $* 是 shell 脚本中的一个特殊变量, 表示将所有传递给脚本的参数用空格分割再合并成一个字符串然后传递给后面的命令
+$debug && log -p d -t "LSPosed" "start $flavor daemon $* | $java_options"
 
 # shellcheck disable=SC2086
 exec /system/bin/app_process $java_options /system/bin --nice-name=lspd org.lsposed.lspd.Main "$@" >/dev/null 2>&1
+# /system/bin: java 虚拟机的工作目录
+# org.lsposed.lspd.Main 是 java 虚拟机的入口
+#  $@ 和 $* 类似, 但是不会合并参数,而是将每个参数都作为一个独立的字符串传递(类似数组的传递方式),这样可以避免参数中的空格被分割
