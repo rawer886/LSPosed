@@ -33,7 +33,7 @@ namespace {
     size_t ParseUint(const char *s) {
         if (s[0] == '\0') return -1;
 
-        while (isspace(*s)) {
+        while (isspace(*s)) {//isspace: 判断是否为空格
             s++;
         }
 
@@ -41,20 +41,24 @@ namespace {
             return -1;
         }
 
+        //判断进制
         int base = (s[0] == '0' && (s[1] == 'x' || s[1] == 'X')) ? 16 : 10;
         char *end;
-        auto result = strtoull(s, &end, base);
-        if (end == s) {
+        auto result = strtoull(s, &end, base);//strtoull: 将字符串转换成无符号长整型数
+        if (end == s) {//不是数字
             return -1;
         }
+        //处理字符串后缀. 比如 :10k
         if (*end != '\0') {
             const char *suffixes = "bkmgtpe";
             const char *suffix;
             if ((suffix = strchr(suffixes, tolower(*end))) == nullptr ||
                 __builtin_mul_overflow(result, 1ULL << (10 * (suffix - suffixes)), &result)) {
+                //__builtin_mul_overflow: 用于检查两个整数相乘是否会导致溢出. 如果相乘不会导致溢出，则将结果存储在 result 指向的位置
                 return -1;
             }
         }
+        //判断是否超出 size_t 的范围
         if (std::numeric_limits<size_t>::max() < result) {
             return -1;
         }
@@ -141,14 +145,18 @@ size_t Logcat::PrintLogLine(const AndroidLogEntry &entry, FILE *out) {
     auto nsec = entry.tv_nsec;
     auto message_len = entry.messageLen;
     const auto *message = entry.message;
-    if (now < 0) {
+    if (now < 0) {//如果是负数, 则需要对其进行取反处理
         nsec = NS_PER_SEC - nsec;
     }
+    //去掉 message 末尾的换行符
     if (message_len >= 1 && message[message_len - 1] == '\n') {
         --message_len;
     }
+    //将 now 转换为本地时间,并存储在 tm 中
     localtime_r(&now, &tm);
+    //将 tm 转换为字符串,并存储在 time_buff 中
     strftime(time_buff.data(), time_buff.size(), "%Y-%m-%dT%H:%M:%S", &tm);
+    //注意: %-15.*s 和 %.*s 的意思, 他们需要两个参数.第一个参数 .* 表示动态长度; 第二个参数是一个字符串
     int len = fprintf(out, "[ %s.%03ld %8d:%6d:%6d %c/%-15.*s ] %.*s\n",
                       time_buff.data(),
                       nsec / MS_PER_NSEC,
@@ -161,6 +169,9 @@ size_t Logcat::PrintLogLine(const AndroidLogEntry &entry, FILE *out) {
     return static_cast<size_t>(len);
 }
 
+/**
+ * 将 end 的内容输出到上个文件中, 然后获取一个新的日志文件,在文件头部写入 start
+ */
 void Logcat::RefreshFd(bool is_verbose) {
     constexpr auto start = "----part %zu start----\n";
     constexpr auto end = "-----part %zu end----\n";
@@ -218,8 +229,10 @@ void Logcat::ProcessBuffer(struct log_msg *buf) {
 
     entry.tagLen--;
 
+    //tag: 标签. 第二个参数表示标签的长度
     std::string_view tag(entry.tag, entry.tagLen);
     bool shortcut = false;
+    //如果是 LSPosed-Bridge 或 XSharedPreferences 的日志, 则输出到 modules_file_ 中
     if (tag == "LSPosed-Bridge"sv || tag == "XSharedPreferences"sv || tag == "LSPosedContext") [[unlikely]] {
         modules_print_count_ += PrintLogLine(entry, modules_file_.get());
         shortcut = true;
@@ -228,8 +241,10 @@ void Logcat::ProcessBuffer(struct log_msg *buf) {
                      entry.pid == my_pid_ || tag == "Magisk"sv || tag == "Dobby"sv ||
                      tag.starts_with("Riru"sv) || tag.starts_with("zygisk"sv) ||
                      tag == "LSPlant"sv || tag.starts_with("LSPosed"sv))) [[unlikely]] {
+        //如果是 LOG_ID_CRASH 或者是 Magisk\Dobby\Riru\zygisk\LSPlant\LSPosed 的日志, 则输出到 verbose_file_ 中
         verbose_print_count_ += PrintLogLine(entry, verbose_file_.get());
     }
+    //如果是 LSPosedLogcat 的日志, 会根据日志内容进行一些简单的日志输出控制
     if (entry.pid == my_pid_ && tag == "LSPosedLogcat"sv) [[unlikely]] {
         std::string_view msg(entry.message, entry.messageLen);
         if (msg == "!!start_verbose!!"sv) {
@@ -245,9 +260,12 @@ void Logcat::ProcessBuffer(struct log_msg *buf) {
     }
 }
 
+/**
+ * 用于监控系统日志相关的属性，并在必要时重新设置日志缓存大小和日志的输出级别
+*/
 void Logcat::EnsureLogWatchDog() {
     constexpr static auto kLogdSizeProp = "persist.logd.size"sv;
-    constexpr static auto kLogdTagProp = "persist.log.tag"sv;
+    constexpr static auto kLogdTagProp = "persist.log.tag"sv;//设置日志的输出级别
     constexpr static auto kLogdMainSizeProp = "persist.logd.size.main"sv;
     constexpr static auto kLogdCrashSizeProp = "persist.logd.size.crash"sv;
     constexpr static size_t kErr = -1;
@@ -267,27 +285,33 @@ void Logcat::EnsureLogWatchDog() {
                 SetIntProp(kLogdMainSizeProp, std::max(kLogBufferSize, logd_main_size));
                 SetIntProp(kLogdCrashSizeProp, std::max(kLogBufferSize, logd_crash_size));
                 SetStrProp(kLogdTagProp, "");
-                SetStrProp("ctl.start", "logd-reinit");
+                SetStrProp("ctl.start", "logd-reinit");//启动 logd-reinit 服务
             }
             const auto *pi = __system_property_find(kLogdTagProp.data());
-            uint32_t serial = 0;
+            uint32_t serial = 0;// 将 kLogdTagProp 属性的值读取到 serial 中
             if (pi != nullptr) {
                 __system_property_read_callback(pi, [](auto *c, auto, auto, auto s) {
                     *reinterpret_cast<uint32_t *>(c) = s;
                 }, &serial);
             }
+            //会阻塞在这里,直到 kLogdTagProp 属性被修改
             if (!__system_property_wait(pi, serial, &serial, nullptr)) break;
-            if (pi != nullptr) Log("\nResetting log settings\n");
-            else std::this_thread::sleep_for(1s);
+            if (pi != nullptr){ 
+                Log("\nResetting log settings\n");
+            } else{
+                Log("\nWatchdog sleep 1s\n");
+                std::this_thread::sleep_for(1s);
+            }
             // log tag prop was not found; to avoid frequently trigger wait, sleep for a while
         }
     });
-    pthread_setname_np(watch_dog.native_handle(), "watchdog");
-    watch_dog.detach();
+    pthread_setname_np(watch_dog.native_handle(), "watchdog");//设置线程名
+    watch_dog.detach();//detach: 分离线程,不需要等待线程结束
 }
 
 void Logcat::Run() {
-    constexpr size_t tail_after_crash = 10U;
+    //constexpr: 常量表达式
+    constexpr size_t tail_after_crash = 10U;//U: unsigned int
     size_t tail = 0;
     RefreshFd(true);
     RefreshFd(false);
@@ -295,10 +319,12 @@ void Logcat::Run() {
     EnsureLogWatchDog();
 
     while (true) {
+        //decltype: 获取表达式的类型
         std::unique_ptr<logger_list, decltype(&android_logger_list_free)> logger_list{
                 android_logger_list_alloc(0, tail, 0), &android_logger_list_free};
         tail = tail_after_crash;
 
+        // 遍历 LOG_ID_MAIN 和 LOG_ID_CRASH, 检测日志缓存大小是否小于 kLogBufferSize, 如果小于则设置为 kLogBufferSize
         for (log_id id:{LOG_ID_MAIN, LOG_ID_CRASH}) {
             auto *logger = android_logger_open(logger_list.get(), id);
             if (logger == nullptr) continue;
@@ -311,10 +337,12 @@ void Logcat::Run() {
         struct log_msg msg{};
 
         while (true) {
+            //unlikely: 表示这个分支的执行概率很小
             if (android_logger_list_read(logger_list.get(), &msg) <= 0) [[unlikely]] break;
 
             ProcessBuffer(&msg);
 
+            //如果日志文件的大小超过了 kMaxLogSize, 则重新获取一个新的日志文件
             if (verbose_print_count_ >= kMaxLogSize) [[unlikely]] RefreshFd(true);
             if (modules_print_count_ >= kMaxLogSize) [[unlikely]] RefreshFd(false);
         }

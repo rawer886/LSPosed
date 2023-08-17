@@ -66,6 +66,10 @@ public class Utils {
         Log.e(LOG_TAG, msg, throwable);
     }
 
+    /**
+     * @return 系统默认时区
+     * GMT: 格林尼治标准时间
+     */
     public static ZoneId getZoneId() {
         var timezone = SystemProperties.get("persist.sys.timezone", "GMT");
         try {

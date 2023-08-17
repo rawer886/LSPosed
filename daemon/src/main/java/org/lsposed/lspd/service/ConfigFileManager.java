@@ -80,6 +80,7 @@ import hidden.HiddenApiBridge;
 public class ConfigFileManager {
     static final Path basePath = Paths.get("/data/adb/lspd");
     static final Path modulePath = basePath.resolve("modules");
+    //获取当前进程的类路径. 也就是当前进程的 apk 路径
     static final Path daemonApkPath = Paths.get(System.getProperty("java.class.path", null));
     static final Path managerApkPath = daemonApkPath.getParent().resolve("manager.apk");
     static final File magiskDbPath = new File("/data/adb/magisk.db");
@@ -117,6 +118,7 @@ public class ConfigFileManager {
     }
 
     private static void createLogDirPath() throws IOException {
+        //NOFOLLOW_LINKS: 不跟踪符号链接, 如果是软连接, 则检查软连接本身,不会检查软连接指向的文件
         if (!Files.isDirectory(logDirPath, LinkOption.NOFOLLOW_LINKS)) {
             Files.deleteIfExists(logDirPath);
         }
@@ -128,6 +130,9 @@ public class ConfigFileManager {
         return res;
     }
 
+    /**
+     * 通过反射的方式加载资源
+     */
     private static void loadRes() {
         if (res != null) return;
         try {
@@ -135,6 +140,7 @@ public class ConfigFileManager {
             //noinspection JavaReflectionMemberAccess DiscouragedPrivateApi
             Method addAssetPath = AssetManager.class.getDeclaredMethod("addAssetPath", String.class);
             addAssetPath.setAccessible(true);
+            Log.i(TAG, "loadRes daemonApkPath : " + daemonApkPath);
             //noinspection ConstantConditions
             if ((int) addAssetPath.invoke(am, daemonApkPath.toString()) > 0) {
                 //noinspection deprecation
@@ -189,6 +195,10 @@ public class ConfigFileManager {
         });
     }
 
+    /*
+     * 修改文件属性可读写,通过系统调用实现.
+     * 0x40086602/0x40046602 Android 平台定义的常量
+     */
     public static boolean chattr0(Path path) {
         try {
             var dir = Os.open(path.toString(), OsConstants.O_RDONLY, 0);
@@ -419,17 +429,20 @@ public class ConfigFileManager {
         return file;
     }
 
+    /**
+     * 尝试获取文件锁
+     */
     static boolean tryLock() {
         var openOptions = new HashSet<OpenOption>();
-        openOptions.add(StandardOpenOption.CREATE);
-        openOptions.add(StandardOpenOption.WRITE);
+        openOptions.add(StandardOpenOption.CREATE);//如果文件不存在则创建
+        openOptions.add(StandardOpenOption.WRITE);//以可写方式打开
         var p = PosixFilePermissions.fromString("rw-------");
         var permissions = PosixFilePermissions.asFileAttribute(p);
 
         try {
             var lockChannel = FileChannel.open(lockPath, openOptions, permissions);
-            locker = new FileLocker(lockChannel);
-            return locker.isValid();
+            locker = new FileLocker(lockChannel);// 获取文件锁, 如果已经被锁定则抛出异常
+            return locker.isValid();//文件锁是否有效
         } catch (Throwable e) {
             return false;
         }
@@ -483,6 +496,7 @@ public class ConfigFileManager {
 
         @Override
         protected void finalize() throws Throwable {
+            Log.e(TAG, "注意!!! FileLocker finalize");
             this.locker.release();
             this.lockChannel.close();
         }

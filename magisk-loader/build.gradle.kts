@@ -311,6 +311,7 @@ val reRunDaemon = task<Exec>("reRunDaemon") {
     group = "LSPosed"
     dependsOn(pushDaemon, pushDaemonNative, killLspd)
     // tricky to pass a minus number to avoid the injection warning
+    // 设置环境变量 ASH_STANDALONE=1; -p: 启动一个新的 shell, 并且复制环境变量
     commandLine(
         adb, "shell", "ASH_STANDALONE=1", "su", "-mm", "-pc",
         "/data/adb/magisk/busybox sh /data/adb/modules/*_lsposed/service.sh --system-server-max-retry=-1&"

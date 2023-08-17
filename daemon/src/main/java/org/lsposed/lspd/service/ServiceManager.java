@@ -91,13 +91,16 @@ public class ServiceManager {
 
     // call by ourselves
     public static void start(String[] args) {
-        if (!ConfigFileManager.tryLock()) System.exit(0);
+        if (!ConfigFileManager.tryLock()) {
+            Log.e(TAG, "LSPosed daemon is already running, pid = " + Process.myPid() + ", exit.");
+            System.exit(0);
+        }
 
         int systemServerMaxRetry = 1;
         for (String arg : args) {
             if (arg.equals("--from-service")) {
                 Log.w(TAG, "LSPosed daemon is not started properly. Try for a late start...");
-            } else if (arg.startsWith("--system-server-max-retry=")) {
+            } else if (arg.startsWith("--system-server-max-retry=")) {// gradle 脚本中会有一个重启 daemon 的task - reRunDaemon, 会传入这个参数
                 try {
                     systemServerMaxRetry = Integer.parseInt(arg.substring(arg.lastIndexOf('=') + 1));
                 } catch (Throwable ignored) {
@@ -112,6 +115,7 @@ public class ServiceManager {
             System.exit(1);
         });
 
+        //启动 logcat 服务
         logcatService = new LogcatService();
         logcatService.start();
 
