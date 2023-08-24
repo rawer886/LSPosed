@@ -6,6 +6,9 @@ public interface IServiceManager extends IInterface {
 
     IBinder getService(String name);
 
+    /**
+     * Request a callback when a service is registered.
+     */
     public void registerForNotifications(String name, IServiceCallback cb);
 
     abstract class Stub extends Binder implements IServiceManager {

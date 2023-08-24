@@ -119,8 +119,8 @@ public class ServiceManager {
             permissionManagerWorkaround();
 
         Process.setThreadPriority(Process.THREAD_PRIORITY_FOREGROUND);
+        //启动一个 loop 线程
         Looper.prepareMainLooper();
-
 
         mainService = new LSPosedService();
         applicationService = new LSPApplicationService();

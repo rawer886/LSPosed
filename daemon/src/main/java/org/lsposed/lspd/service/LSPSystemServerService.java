@@ -22,6 +22,7 @@ package org.lsposed.lspd.service;
 import static org.lsposed.lspd.service.ServiceManager.TAG;
 import static org.lsposed.lspd.service.ServiceManager.getSystemServiceManager;
 
+import android.os.Binder;
 import android.os.Build;
 import android.os.IBinder;
 import android.os.IServiceCallback;
@@ -32,6 +33,17 @@ import android.util.Log;
 
 public class LSPSystemServerService extends ILSPSystemServerService.Stub implements IBinder.DeathRecipient {
 
+    /**
+     * 这个是系统中用于串口通信的服务 (SerialManager), 通过代理这个服务, 可以实现对系统中串口通信的拦截
+     * <p>
+     * lsp 中在 Service::RequestSystemServerBinder 中会调用这个服务
+     *
+     * @see android.content.Context.SERIAL_SERVICE
+     * @see android.hardware.SerialManager
+     * <p>
+     * 选用这个服务的原因可能是因为这个服务不常用
+     * 注意: 这个服务名在 Android 9 之前是没有的
+     */
     public static final String PROXY_SERVICE_NAME = "serial";
 
     private IBinder originService = null;
@@ -42,20 +54,23 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
     }
 
     public void putBinderForSystemServer() {
+        //抢先注册 serial 服务, 这样就可以让系统中的 SerialManager 服务调用到这个服务
         android.os.ServiceManager.addService(PROXY_SERVICE_NAME, this);
+        //清理 originService 的死亡通知. 因为这个时候 originService 应该还是 null, 没有被赋值. 除非是重启 lspd 服务的时候 originService 不为 null
         binderDied();
     }
 
     public LSPSystemServerService(int maxRetry) {
-        Log.d(TAG, "LSPSystemServerService::LSPSystemServerService");
+        Log.d(TAG, "new LSPSystemServerService::LSPSystemServerService");
         requested = -maxRetry;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {// Android 11
             // Registers a callback when system is registering an authentic "serial" service
             // And we are proxying all requests to that system service
             var serviceCallback = new IServiceCallback.Stub() {
                 @Override
                 public void onRegistration(String name, IBinder binder) {
-                    Log.d(TAG, "LSPSystemServerService::LSPSystemServerService onRegistration: " + name + " " + binder);
+                    //向 ServiceManager 添加服务的时候会调用. putBinderForSystemServer 的时候也会调用, 所以需要添加一个判断
+                    Log.d(TAG, "LSPSystemServerService::LSPSystemServerService onRegistration: " + name + " " + binder + " | callPid = " + Binder.getCallingPid());
                     if (name.equals(PROXY_SERVICE_NAME) && binder != null && binder != LSPSystemServerService.this) {
                         Log.d(TAG, "Register " + name + " " + binder);
                         originService = binder;
@@ -64,7 +79,7 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
                 }
 
                 @Override
-                public IBinder asBinder() {
+                public IBinder asBinder() {//registerForNotifications 的时候会调用
                     return this;
                 }
             };
@@ -88,13 +103,14 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
 
     @Override
     public boolean onTransact(int code, Parcel data, Parcel reply, int flags) throws RemoteException {
-        Log.d(TAG, "LSPSystemServerService.onTransact: code=" + code);
+        Log.d(TAG, "LSPSystemServerService.onTransact: code=" + code + " | callPid = " + Binder.getCallingPid());
         if (originService != null) {
+            Log.d(TAG, "LSPSystemServerService.onTransact: call originService=" + originService);
             return originService.transact(code, data, reply, flags);
         }
 
         switch (code) {
-            case BridgeService.TRANSACTION_CODE -> {
+            case BridgeService.TRANSACTION_CODE -> {//1598837584
                 int uid = data.readInt();
                 int pid = data.readInt();
                 String processName = data.readString();
@@ -110,7 +126,7 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
                     return false;
                 }
             }
-            case LSPApplicationService.OBFUSCATION_MAP_TRANSACTION_CODE, LSPApplicationService.DEX_TRANSACTION_CODE -> {
+            case LSPApplicationService.OBFUSCATION_MAP_TRANSACTION_CODE, LSPApplicationService.DEX_TRANSACTION_CODE -> {//724533732
                 // Proxy LSP dex transaction to Application Binder
                 return ServiceManager.getApplicationService().onTransact(code, data, reply, flags);
             }
@@ -122,6 +138,7 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
 
     public void linkToDeath() {
         try {
+            //flag = 0, 表示不会调用 onBinderDied
             originService.linkToDeath(this, 0);
         } catch (Throwable e) {
             Log.e(TAG, "system server service: link to death", e);
@@ -136,6 +153,7 @@ public class LSPSystemServerService extends ILSPSystemServerService.Stub impleme
         }
     }
 
+    //重启 Zygote
     public void maybeRetryInject() {
         if (requested < 0) {
             Log.w(TAG, "System server injection fails, trying a restart");

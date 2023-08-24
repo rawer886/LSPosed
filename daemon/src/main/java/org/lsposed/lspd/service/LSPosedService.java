@@ -320,9 +320,11 @@ public class LSPosedService extends ILSPosedService.Stub {
                         Log.e(TAG, "performReceive: ", t);
                     }
                 });
+                //如果 ordered 参数为 false，则广播接收器的生命周期会在 onReceive 方法执行完毕后自动结束。
                 if (!ordered && !Objects.equals(intent.getAction(), Intent.ACTION_LOCKED_BOOT_COMPLETED))
                     return;
                 try {
+                    //调用 ActivityManagerService.finishReceiver() 方法结束广播接收器的生命周期。
                     ActivityManagerService.finishReceiver(this, appThread, resultCode, data, extras, false, intent.getFlags());
                 } catch (RemoteException e) {
                     Log.e(TAG, "finish receiver", e);
