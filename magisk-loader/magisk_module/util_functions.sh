@@ -52,6 +52,8 @@ check_android_version() {
 check_incompatible_module() {
   MODULEDIR="$(magisk --path)/.magisk/modules"
   for id in "riru_dreamland" "riru_edxposed" "riru_edxposed_sandhook" "taichi"; do
+    # -d: 是否是目录；-f: 文件是否存在 ；-z: 字符串是否为空
+    # 存在目录且不存在 disable 文件和 remove 文件； disable: 模块被禁用，remove: 模块被卸载
     if [ -d "$MODULEDIR/$id" ] && [ ! -f "$MODULEDIR/$id/disable" ] && [ ! -f "$MODULEDIR/$id/remove" ]; then
       ui_print "*********************************************************"
       ui_print "! Please disable or uninstall incompatible frameworks:"
@@ -61,3 +63,4 @@ check_incompatible_module() {
     fi
   done
 }
+

@@ -19,6 +19,7 @@
 #
 
 TMPDIR_FOR_VERIFY="$TMPDIR/.vunzip"
+# /dev/tmp/.vunzip
 mkdir "$TMPDIR_FOR_VERIFY"
 
 abort_verify() {
@@ -64,8 +65,14 @@ hash_path="$file_path.sha256"
 unzip -o "$ZIPFILE" "META-INF/com/google/android/*" -d "$TMPDIR_FOR_VERIFY" >&2
 [ -f "$file_path" ] || abort_verify "$file not exists"
 if [ -f "$hash_path" ]; then
+  # -c 选项表示将哈希值与文件中包含的哈希值进行比较，-s 选项表示不输出任何错误消息，- 表示从标准输入中读取哈希值,也就是从管道符中读取传递过来的哈希值和文件路径
+  # 一般比较文件 hash 的命令格式如下: echo "sha256哈希值 文件名" | sha256sum -c
   (echo "$(cat "$hash_path")  $file_path" | sha256sum -c -s -) || abort_verify "Failed to verify $file"
   ui_print "- Verified $file" >&1
 else
   ui_print "- Download from Magisk app"
 fi
+
+
+# >&1: 将输出重定向到标准输出; 将会在终端显示
+# >&2: 将输出重定向到标准错误输出; 也会在终端显示
