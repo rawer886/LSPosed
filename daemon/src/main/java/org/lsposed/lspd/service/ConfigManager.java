@@ -135,6 +135,16 @@ public class ConfigManager {
         }
     }
 
+    /**
+     * 数据库表 modules
+     * <p>
+     * | 列名            | 数据类型 | 约束条件                |
+     * | -------------- | -------- | ----------------------- |
+     * | mid            | integer  | PRIMARY KEY, AUTOINCREMENT |
+     * | module_pkg_name| text     | NOT NULL, UNIQUE         |
+     * | apk_path       | text     | NOT NULL                 |
+     * | enabled        | BOOLEAN  | DEFAULT 0, CHECK (enabled IN (0, 1)) |
+     */
     private final SQLiteStatement createModulesTable = db.compileStatement("CREATE TABLE IF NOT EXISTS modules (" +
             "mid integer PRIMARY KEY AUTOINCREMENT," +
             "module_pkg_name text NOT NULL UNIQUE," +
@@ -142,6 +152,19 @@ public class ConfigManager {
             "enabled BOOLEAN DEFAULT 0 " +
             "CHECK (enabled IN (0, 1))" +
             ");");
+
+    /**
+     * 数据库表 scope
+     * <p>
+     * | 列名            | 数据类型  | 约束条件                 |
+     * | -------------- | -------- | ----------------------- |
+     * | mid            | integer  |                         |
+     * | app_pkg_name   | text     | NOT NULL                |
+     * | user_id        | integer  | NOT NULL                |
+     * <p>
+     * 主键：(mid, app_pkg_name, user_id)
+     * 外键：mid REFERENCES modules(mid) ON DELETE CASCADE
+     */
     private final SQLiteStatement createScopeTable = db.compileStatement("CREATE TABLE IF NOT EXISTS scope (" +
             "mid integer," +
             "app_pkg_name text NOT NULL," +
@@ -152,6 +175,20 @@ public class ConfigManager {
             "  REFERENCES modules (mid)" +
             "  ON DELETE CASCADE" +
             ");");
+
+    /**
+     * 数据库表 configs
+     * <p>
+     * | 列名            | 数据类型 | 约束条件                  |
+     * | -------------- | -------- | ----------------------- |
+     * | module_pkg_name| text     | NOT NULL                |
+     * | user_id        | integer  | NOT NULL                |
+     * | group          | text     | NOT NULL                |
+     * | key            | text     | NOT NULL                |
+     * | data           | blob     | NOT NULL                |
+     * <p>
+     * 主键：(module_pkg_name, user_id, group, key)
+     */
     private final SQLiteStatement createConfigTable = db.compileStatement("CREATE TABLE IF NOT EXISTS configs (" +
             "module_pkg_name text NOT NULL," +
             "user_id integer NOT NULL," +
@@ -368,7 +405,10 @@ public class ConfigManager {
 
     private void initDB() {
         try {
+            //启用外键约束
             db.setForeignKeyConstraintsEnabled(true);
+            Log.i(TAG, "db version: " + db.getVersion());
+            //注意在 case 之后没有使用 break, 这样就完成数据库的完整升级
             switch (db.getVersion()) {
                 case 0:
                     executeInTransaction(() -> {
@@ -379,6 +419,7 @@ public class ConfigManager {
                         values.put("module_pkg_name", "lspd");
                         values.put("apk_path", ConfigFileManager.managerApkPath.toString());
                         // dummy module for config
+                        //CONFLICT_IGNORE 代表如果插入的数据已经存在了就不会再插入了
                         db.insertWithOnConflict("modules", null, values, SQLiteDatabase.CONFLICT_IGNORE);
                         db.setVersion(1);
                     });
@@ -420,7 +461,6 @@ public class ConfigManager {
         } catch (Throwable e) {
             Log.e(TAG, "init db", e);
         }
-
     }
 
     private List<ProcessScope> getAssociatedProcesses(Application app) throws RemoteException {
@@ -445,6 +485,7 @@ public class ConfigManager {
     Map<String, HashMap<String, Object>> fetchModuleConfig(String name, int user_id) {
         var config = new ConcurrentHashMap<String, HashMap<String, Object>>();
 
+        //select `group`, `key`, data from configs where module_pkg_name = ? and user_id = ?
         try (Cursor cursor = db.query("configs", new String[]{"`group`", "`key`", "data"},
                 "module_pkg_name = ? and user_id = ?", new String[]{name, String.valueOf(user_id)}, null, null, null)) {
             if (cursor == null) {
