@@ -346,7 +346,10 @@ public class PackageService {
 
     public static boolean performDexOptMode(String packageName) throws RemoteException {
         IPackageManager pm = getPackageManager();
-        if (pm == null) return false;
+        if (pm == null) {
+            Log.w(TAG, "pm is null");
+            return false;
+        }
         return pm.performDexOptMode(packageName,
                 SystemProperties.getBoolean("dalvik.vm.usejitprofiles", false),
                 SystemProperties.get("pm.dexopt.install", "speed-profile"), true, true, null);

@@ -5,6 +5,7 @@
     public static void main(java.lang.String[]);
 }
 -keepclasseswithmembers class org.lsposed.lspd.service.Dex2OatService {
+#todo 可以移除
     private java.lang.String devTmpDir;
     private java.lang.String magiskPath;
     private java.lang.String fakeBin32;

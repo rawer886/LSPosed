@@ -46,6 +46,9 @@
 #define LOGW(...)  __android_log_print(ANDROID_LOG_WARN, LOG_TAG, __VA_ARGS__)
 #define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 #define LOGF(...)  __android_log_print(ANDROID_LOG_FATAL, LOG_TAG, __VA_ARGS__)
+//##:  是一个预处理器的连接符，用于将可变参数列表展开为一个空格分隔的参数序列
+//errno: 是一个全局变量，保存了上一次系统调用的错误码
+//strerror(errno): 是一个将错误码转化为可读的错误描述的函数
 #define PLOGE(fmt, args...) LOGE(fmt " failed with %d: %s", ##args, errno, strerror(errno))
 #endif
 

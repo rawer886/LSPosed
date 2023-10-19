@@ -130,7 +130,7 @@ public class ServiceManager {
         applicationService = new LSPApplicationService();
         managerService = new LSPManagerService();
         systemServerService = new LSPSystemServerService(systemServerMaxRetry);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {// Android 10
             dex2OatService = new Dex2OatService();
             dex2OatService.start();
         }

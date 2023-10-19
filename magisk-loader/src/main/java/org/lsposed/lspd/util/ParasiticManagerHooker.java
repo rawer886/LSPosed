@@ -151,6 +151,7 @@ public class ParasiticManagerHooker {
                         intent.setComponent(new ComponentName(intent.getComponent().getPackageName(), "org.lsposed.manager.ui.activity.MainActivity"));
                     }
                 }
+                //启动 LSP Manager
                 if (param.method.getName().equals("scheduleLaunchActivity")) {
                     ActivityInfo aInfo = null;
                     var parameters = ((Method) param.method).getParameterTypes();
