@@ -55,6 +55,14 @@ namespace lspd {
         } else if (SET_ACTIVITY_CONTROLLER_CODE != -1 &&
                    code == SET_ACTIVITY_CONTROLLER_CODE) [[unlikely]] {
             va_copy(copy, args);
+            /**
+             * 调用方是 app 权限，为什么在这里替换掉之后就能绕过权限检查执行 ActivityManagerService#setActivityController ？
+             *
+             * 1. 首先权限校验是在调用 setActivityController 的时候校验的，然而我们并没有直接去调用改方法
+             * 2. 我们是先去调用 activity_manager_service 的 transact 方法
+             * 3. 然后拦截的是 transact 方法的服务端处理，这个是在 Binder#execTransact 中处理的（system_process）
+             * 4. 之后就可以在 execTransact 中调用 setActivityController 方法
+             */
             if (instance()->replace_activity_controller_methodID_) {
                 *res = JNI_CallStaticBooleanMethod(env, instance()->bridge_service_class_,
                                                    instance()->replace_activity_controller_methodID_,
@@ -62,7 +70,7 @@ namespace lspd {
             }
             va_end(copy);
             // fallback the backup
-        } else if (code == (('_' << 24) | ('C' << 16) | ('M' << 8) | 'D')) {
+        } else if (code == (('_' << 24) | ('C' << 16) | ('M' << 8) | 'D')) {//1598246212
             va_copy(copy, args);
             if (instance()->replace_shell_command_methodID_) {
                 *res = JNI_CallStaticBooleanMethod(env, instance()->bridge_service_class_,
@@ -75,6 +83,12 @@ namespace lspd {
         return false;
     }
 
+    /**
+     * 筛选 jni#CallBooleanMethodV 方法中 methodId 为 execTransact 的调用
+     *  T: 先尝试调用 exec_transact_replace 方法
+     *      如果其返回值为 false，则调用原方法
+     *  F: 调用原方法 —— call_boolean_method_va_backup_
+     */
     jboolean
     Service::call_boolean_method_va_replace(JNIEnv *env, jobject obj, jmethodID methodId,
                                             va_list args) {
@@ -86,6 +100,7 @@ namespace lspd {
         return instance()->call_boolean_method_va_backup_(env, obj, methodId, args);
     }
 
+    //初始化：获取常用 java 方法的签名
     void Service::InitService(JNIEnv *env) {
         if (initialized_) [[unlikely]] return;
 
@@ -129,7 +144,7 @@ namespace lspd {
         read_strong_binder_method_ = JNI_GetMethodID(env, parcel_class_, "readStrongBinder",
                                                      "()Landroid/os/IBinder;");
         read_string_method_ = JNI_GetMethodID(env, parcel_class_, "readString",
-                                                     "()Ljava/lang/String;");
+                                              "()Ljava/lang/String;");
         read_file_descriptor_method_ = JNI_GetMethodID(env, parcel_class_, "readFileDescriptor",
                                                        "()Landroid/os/ParcelFileDescriptor;");
 //        createStringArray_ = env->GetMethodID(parcel_class_, "createStringArray",
@@ -156,10 +171,15 @@ namespace lspd {
         return signature;
     }
 
+    /**
+     *  1. 获取 BridgeService 内的 execTransact、replaceActivityController、replaceShellCommand 方法
+     *  2. 替换 JNIEnv 的函数表(env->functions) 的 CallBooleanMethodV 为 call_boolean_method_va_replace
+     */
     void Service::HookBridge(const Context &context, JNIEnv *env) {
         static bool kHooked = false;
         // This should only be ran once, so unlikely
         if (kHooked) [[unlikely]] return;
+        //如果 InitService 没有执行结束，直接返回
         if (!initialized_) [[unlikely]] return;
         kHooked = true;
         if (auto bridge_service_class = context.FindClassFromCurrentLoader(env,
@@ -198,11 +218,17 @@ namespace lspd {
         auto binder_class = JNI_FindClass(env, "android/os/Binder");
         exec_transact_backup_methodID_ = JNI_GetMethodID(env, binder_class, "execTransact",
                                                          "(IJJI)Z");
+        //art::JNIEnvExt::SetTableOverride(JNINativeInterface const*)
         auto *setTableOverride = SandHook::ElfImg("/libart.so").getSymbAddress<void (*)(JNINativeInterface *)>(
                 "_ZN3art9JNIEnvExt16SetTableOverrideEPK18JNINativeInterface");
         if (!setTableOverride) {
             LOGE("set table override not found");
         }
+        /**
+         *  1. 拷贝 JNIEnv 的函数表(env->functions) 到 native_interface_replace_
+         *  2. 替换 CallBooleanMethodV 为 call_boolean_method_va_replace, 并保存原方法到 call_boolean_method_va_backup_
+         *  3. 更新 JNIEnv 的函数表
+         */
         memcpy(&native_interface_replace_, env->functions, sizeof(JNINativeInterface));
 
         call_boolean_method_va_backup_ = env->functions->CallBooleanMethodV;
@@ -224,6 +250,20 @@ namespace lspd {
         LOGD("Done InitService");
     }
 
+    /**
+     * 获取 LSPApplicationService 的 binder
+     *
+     *  1. 获取 ActivityManagerService 的 binder
+     *  2. 调用 ActivityManagerService#transact(BRIDGE_TRANSACTION_CODE, data, reply, 0)
+     *  3. 从 reply 中获取 LSPApplicationService binder
+     *
+     * 为什么调用上面的步骤二，就能获取 LSPApplicationService 的 binder？
+     *   因为调用 ActivityManagerService#transact 时，在 binder 内部会触发 binde#execTransact。
+     *   因为受 call_boolean_method_va_replace 方法的影响，然后就被转移到了 BridgeService#execTransact 方法
+     *
+     * 为什么选用 "activity" 这个服务？
+     *   因为这个方法是在应用启动的时候被调用的，普通应用没有办法获取 serial 服务，所以只能换一个更常用的服务，就选择了它
+    */
     ScopedLocalRef<jobject> Service::RequestBinder(JNIEnv *env, jstring nice_name) {
         if (!initialized_) [[unlikely]] {
             LOGE("Service not initialized");
@@ -262,12 +302,19 @@ namespace lspd {
         JNI_CallVoidMethod(env, data, recycleMethod_);
         JNI_CallVoidMethod(env, reply, recycleMethod_);
         if (service) {
+            // 为了保证 heart_beat_binder 不被回收 ？
             JNI_NewGlobalRef(env, heart_beat_binder);
         }
 
         return service;
     }
 
+    /**
+     *  获取 LSPSystemServerService 的 binder, 通过 ServiceManager#getService("serial") 获取
+     *
+     *  阻塞式获取，最多尝试 3 次，每次间隔 1s
+     *  因为 LSPSystemServerService 是在 zygote 进程启动的时候就被启动的，所以一般情况 3s 内一定能获取到
+     */
     ScopedLocalRef<jobject> Service::RequestSystemServerBinder(JNIEnv *env) {
         if (!initialized_) [[unlikely]] {
             LOGE("Service not initialized");
@@ -295,6 +342,11 @@ namespace lspd {
         return binder;
     }
 
+    /**
+     * 获取 LSPApplicationService 的 binder
+     * 1. 调用 LSPSystemServerService#transact(BRIDGE_TRANSACTION_CODE, data, reply, 0)
+     * 2. 从 reply 中获取 LSPApplicationService binder
+     */
     ScopedLocalRef<jobject> Service::RequestApplicationBinderFromSystemServer(JNIEnv *env, const ScopedLocalRef<jobject> &system_server_binder) {
         auto heart_beat_binder = JNI_NewObject(env, binder_class_, binder_ctor_);
         Wrapper wrapper{env, this};
@@ -318,6 +370,12 @@ namespace lspd {
         return app_binder;
     }
 
+    /**
+     *  获取 framework/lspd.dex 文件
+     *  1. 调用 LSPApplicationService#transact(DEX_TRANSACTION_CODE, data, reply, 0)
+     *  2. 从 reply 中获取文件描述符和文件大小
+     *  3. 返回文件描述符和文件大小
+     */
     std::tuple<int, size_t> Service::RequestLSPDex(JNIEnv *env, const ScopedLocalRef<jobject> &binder) {
         Wrapper wrapper{env, this};
         bool res = wrapper.transact(binder, DEX_TRANSACTION_CODE);
@@ -332,6 +390,12 @@ namespace lspd {
         return {fd, size};
     }
 
+    /**
+     * 获取 obfuscation map，用来混淆 Xposed 的 api 签名，参考：ObfuscationManager.getSignatures()
+     *  1. 调用 LSPApplicationService#transact(OBFUSCATION_MAP_TRANSACTION_CODE, data, reply, 0)
+     *  2. 判断返回的 reply.size 是否为偶数(因为返回的值是将 key、value 交替写入的)
+     *  3. 读取 reply 中的 key、value，写入 map 中
+     */
     std::map<std::string, std::string>
     Service::RequestObfuscationMap(JNIEnv *env, const ScopedLocalRef<jobject> &binder) {
         std::map<std::string, std::string> ret;

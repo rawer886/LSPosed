@@ -34,12 +34,12 @@ namespace lspd {
     class Service {
         constexpr static jint DEX_TRANSACTION_CODE = 1310096052;
         constexpr static jint OBFUSCATION_MAP_TRANSACTION_CODE = 724533732;
-        constexpr static jint BRIDGE_TRANSACTION_CODE = 1598837584;
+        constexpr static jint BRIDGE_TRANSACTION_CODE = 1598837584;// 对用方法为 BridgeService#execTransact
         constexpr static auto BRIDGE_SERVICE_DESCRIPTOR = "LSPosed"sv;
         constexpr static auto BRIDGE_SERVICE_NAME = "activity"sv;
         constexpr static auto SYSTEM_SERVER_BRIDGE_SERVICE_NAME = "serial"sv;
         constexpr static jint BRIDGE_ACTION_GET_BINDER = 2;
-        inline static jint SET_ACTIVITY_CONTROLLER_CODE = -1;
+        inline static jint SET_ACTIVITY_CONTROLLER_CODE = -1;//对应 ActivityManagerNative#setActivityController 方法的 transaction code
 
         class Wrapper {
         public:
@@ -105,15 +105,15 @@ namespace lspd {
         jboolean (*call_boolean_method_va_backup_)(JNIEnv *env, jobject obj, jmethodID methodId,
                                                   va_list args) = nullptr;
 
-        jclass bridge_service_class_ = nullptr;
+        jclass bridge_service_class_ = nullptr;//org.lsposed.lspd.service.BridgeService
         jmethodID exec_transact_replace_methodID_ = nullptr;
         jmethodID replace_activity_controller_methodID_ = nullptr;
         jmethodID replace_shell_command_methodID_ = nullptr;
 
-        jclass binder_class_ = nullptr;
-        jmethodID binder_ctor_ = nullptr;
+        jclass binder_class_ = nullptr;//android.os.IBinder
+        jmethodID binder_ctor_ = nullptr;//<init>
 
-        jclass service_manager_class_ = nullptr;
+        jclass service_manager_class_ = nullptr;//android.os.ServiceManager
         jmethodID get_service_method_ = nullptr;
 
         jmethodID transact_method_ = nullptr;
