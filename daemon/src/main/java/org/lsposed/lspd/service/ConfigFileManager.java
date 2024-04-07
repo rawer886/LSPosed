@@ -341,6 +341,9 @@ public class ConfigFileManager {
         });
     }
 
+    /**
+     * 将 inputStream 中的数据读入到共享内存中去，
+     */
     private static SharedMemory readDex(InputStream in, boolean obfuscate) throws IOException, ErrnoException {
         var memory = SharedMemory.create(null, in.available());
         var byteBuffer = memory.mapReadWrite();
@@ -370,6 +373,11 @@ public class ConfigFileManager {
         }
     }
 
+    /**
+     * 读取 zip 文件中的 initName 文件, 并将文件中的内容按行写入到 names 中
+     * <p>
+     * 主要用来读取 xposed_init、native_init 等文件
+     */
     private static void readName(ZipFile apkFile, String initName, List<String> names) {
         var initEntry = apkFile.getEntry(initName);
         if (initEntry == null) return;
@@ -395,6 +403,7 @@ public class ConfigFileManager {
         var moduleLibraryNames = new ArrayList<String>(1);
         try (var apkFile = new ZipFile(toGlobalNamespace(path))) {
             readDexes(apkFile, preLoadedDexes, obfuscate);
+            //参考开发文档: https://github.com/LSPosed/LSPosed/wiki/Develop-Xposed-Modules-Using-Modern-Xposed-API#api-changes
             readName(apkFile, "META-INF/xposed/java_init.list", moduleClassNames);
             if (moduleClassNames.isEmpty()) {
                 file.legacy = true;
